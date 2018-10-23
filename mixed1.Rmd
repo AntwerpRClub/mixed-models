@@ -1,0 +1,201 @@
+---
+title: "r coding club mixed models intro"
+author: "Stefan Van Dongen"
+date: "10 september 2018"
+output:
+  slidy_presentation: default
+#  ioslides_presentation: default
+#  beamer_presentation: default
+# fig_width: 6 
+# fig_height: 4 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+## Mixed/hierarchical models
+
+1. Why?
+    + Because you often have to!
+    + Whenever there is some (nuisance)-structure in your data
+2. What?
+    + Models with random effects!
+3. How? 
+    + Easy in R (or many other packages)
+4. What is then so difficult about it? 
+    + Set up your model
+    + (Interpret the output) 
+
+## Why?
+* Let us talk about the radon data
+* Radon radiation in houses (878) in different counties of Minnesota (85 counties)
+* Some houses have a basement, others do not (with basement one expects higher radon issue)
+* at county level, ground-uranium levels are known (may allow predictions)
+
+
+## The radon dataset
+
+```{r radondata, echo = F,comment=NA}
+rad<-read.table('radon.txt',header=T)
+attach(rad)
+head(rad)
+table(basement)
+```
+
+## Does the amount of Uranium predict radon radiation in houses and are there differences in buildings with or without basement
+
+```{r plot radon vs uranium 1,comment=NA}
+plot(uranium,radon,pch=as.integer(basement),col=as.integer(basement))
+```
+
+## A simple regression
+
+```{r simple regression,comment=NA}
+summary(lm(radon~uranium))
+```
+
+## Data not independent at county level
+
+```{r plot with averages,comment=NA}
+library(Hmisc,warn.conflicts=F, quietly=T)
+means_r<-tapply(radon,county,mean)
+sd<-tapply(radon,county,sd)
+n<-tapply(radon,county,length)
+se_r<-sd/sqrt(n)
+means_u<-tapply(uranium,county,mean)
+errbar(means_u,means_r,yplus=(means_r+se_r),ymin=(means_r-se_r))
+```
+
+
+## A simple regression on the averages?
+
+```{r simple regression2,comment=NA}
+summary(lm(means_r~means_u))
+```
+## Add county as fixed effect?
+
+```{r anova1,comment=NA}
+summary(lm(radon~uranium+county))
+```
+
+## A mixed model!
+
+```{r mixed model1,comment=NA, echo=TRUE, message=F, warning=F}
+library(lmerTest)
+lm1<-lmer(radon~uranium+(1|county))
+summary(lm1)
+```
+
+## What is the random effects part?
+
+```{r mixed model2,comment=NA}
+head(data.frame(ranef(lm1)),n=10)
+```
+
+
+## What is the random effects part?
+
+```{r mixed model3,comment=NA}
+errbar(means_u,means_r,yplus=(means_r+se_r),ymin=(means_r-se_r))
+abline(0.55,0.775)
+points(means_u[7],means_r[7],col='blue',cex=1,pch=19)
+```
+
+## making predictions
+
+```{r predictions,comment=NA}
+errbar(means_u,means_r,yplus=(means_r+se_r),ymin=(means_r-se_r))
+abline(0.55,0.775)
+points(means_u[7],means_r[7],col='blue',cex=1,pch=19)
+points(means_u[7],predict(lm1,newdata=data.frame(uranium = means_u[7]),re.form=NA),cex=1,pch=19,col='red')
+points(means_u[7],predict(lm1,newdata=data.frame(uranium = means_u[7], county='BLUEEARTH'),re.form=~(1|county)),cex=1,pch=19,col='green')
+```
+
+## Add basement effect
+
+```{r mixed with basement1,comment=NA, echo=TRUE, message=F, warning=F}
+lm2<-lmer(radon~uranium+basement+(1|county))
+summary(lm2)
+```
+
+## Random slopes needed
+
+```{r mixed with basement2,comment=NA, echo=TRUE, message=F, warning=F}
+lm3<-lmer(radon~uranium+basement+(1+basement|county))
+summary(lm3)
+```
+
+## Random slopes needed 2
+
+```{r mixed with basement3,comment=NA, echo=TRUE, message=F, warning=F}
+base<-(basement == 'Y')-0.5
+lm3<-lmer(radon~uranium+base+(1+base|county))
+summary(lm3)
+```
+
+## Random slopes interpretation
+
+```{r mixed with basement4}
+int_slopes<-ranef(lm3)$county
+coeff<-coef(lm3)$county
+means_rn<-tapply(radon[basement == 'N'],county[basement == 'N'],mean)
+means_ry<-tapply(radon[basement == 'Y'],county[basement == 'Y'],mean)
+means_r2<-c(means_rn[1:7],means_ry[1:7])
+basem<-c(rep(-0.5,7),rep(0.5,7))
+plot(basem,means_r2,pch=19,ylab='Radon levels',xlab='basement no or yes',col=c(1:7,1:7),xlim=c(-0.75,0.75))
+for(i in 1:5){
+  lines(c(basem[i],basem[i+7]),c(means_r2[i],means_r2[i+7]),col=i,lwd=4)}
+for(i in 1:7){
+  abline((coeff[i,1]+coeff[i,2]*means_u[i]),coeff[i,3],col=i,lwd=2,lty=2)
+}
+
+
+```
+
+## Let us all become Bayesians ;-)
+
+1. Why Bayesian?
+    + it makes more sence
+    + it is very flexible!!
+    + include prior information
+2. Why not Bayesian?
+    + Faster
+    + non-parametrics often easy
+    + No need to chose a prior
+    + More diagnostics
+
+
+## Radon data analysis in a Bayesian model
+
+```{r bayesian1,comment=NA, echo=TRUE, message=F, warning=F,tidy=TRUE}
+library(MCMCglmm)
+x<-data.frame(cbind(radon,uranium,base,county))
+lm4<-MCMCglmm(radon~uranium+base,random=~county+base:county,data=x,verbose=F)
+plot(lm4$VCV)
+```
+
+## The Bayesian analysis with a longer MCMC
+
+```{r bayesian2,comment=NA, echo=TRUE, message=F, warning=F,tidy=T}
+lm5<-MCMCglmm(radon~uranium+base,random=~county+base:county,data=x,nitt=550000,thin=50,burnin=50000,verbose=F)
+plot(lm5$VCV)
+```
+
+## Interpretation of the output
+
+```{r bayesian3,comment=NA, echo=TRUE, message=F, warning=F}
+summary(lm5)
+```
+
+## For the 'real' Bayesians: OpenBugs
+
+```{r bayesian figure, message=F, warning=F}
+library(png)
+library(gridGraphics)
+img <- readPNG("C:/Users/Support/Documents/r coding club/images/winbugs1.png")
+grid.raster(img)
+```
+
+
